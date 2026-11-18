@@ -1,9 +1,9 @@
-# FinLab — Squelette du projet
+# Analyseur de transaction bancaire
 
 ## Structure
 
 ```
-finlab/
+Analyseur-de-transaction-bancaire/
 ├── build.sbt
 ├── data/
 │   └── transactions.csv          (183 transactions à analyser)
@@ -41,8 +41,4 @@ progressivement et que vous puissiez tester à chaque étape.
    ```
 3. Si vous bloquez sur une étape, passez à la suivante en remplaçant
    le `???` par une valeur factice — ça vous débloquera le reste.
-# Finlab_Squelettes
-# Analyseur-de-transactions-bancaires
-# Analyseur-de-transactions-bancaires
-# Analyseur-de-transactions-bancaires
-# Analyseur-de-transactions-bancaires
+
