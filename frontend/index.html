@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analyseur Bancaire — Client Web Scala</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background-color: #0b1120; color: #f8fafc; font-family: system-ui, sans-serif; }
+    .card { background: #131c31; border: 1px solid #1e293b; border-radius: 12px; }
+  </style>
+</head>
+<body class="p-6 max-w-7xl mx-auto space-y-6">
+
+  <!-- Header -->
+  <header class="flex flex-wrap justify-between items-center gap-4 border-b border-slate-800 pb-4">
+    <div>
+      <div class="flex items-center gap-2">
+        <span class="h-3 w-3 rounded-full bg-emerald-400 animate-pulse"></span>
+        <h1 class="text-2xl font-bold tracking-tight">Analyseur <span class="text-emerald-400">Bancaire</span></h1>
+      </div>
+
+    </div>
+    <button onclick="exporterPdf()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition ml-2">
+      Télécharger PDF
+    </button>
+
+    <script>
+      async function exporterPdf() {
+        const res = await fetch('/api/rapport-pdf');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rapport.pdf';
+        a.click();
+      }
+    </script>
+  </header>
+
+  <!-- KPI Cards (alimentées par /api/stats) -->
+  <section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="card p-4">
+      <p class="text-xs text-slate-400 uppercase">Transactions</p>
+      <p id="kpi-total" class="text-2xl font-bold mt-1">—</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs text-slate-400 uppercase">Total Crédits</p>
+      <p id="kpi-credits" class="text-2xl font-bold text-emerald-400 mt-1">—</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs text-slate-400 uppercase">Total Débits</p>
+      <p id="kpi-debits" class="text-2xl font-bold text-rose-400 mt-1">—</p>
+    </div>
+    <div class="card p-4">
+      <p class="text-xs text-slate-400 uppercase">Solde Net</p>
+      <p id="kpi-solde" class="text-2xl font-bold mt-1">—</p>
+    </div>
+  </section>
+
+  <!-- Graphiques -->
+  <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="card p-5">
+      <h2 class="text-sm font-semibold text-slate-300 mb-4">Dépenses par Catégorie (Agregations.scala)</h2>
+      <canvas id="chartCategories" height="180"></canvas>
+    </div>
+    <div class="card p-5">
+      <h2 class="text-sm font-semibold text-slate-300 mb-4">Dépenses par Compte (Agregations.scala)</h2>
+      <canvas id="chartComptes" height="180"></canvas>
+    </div>
+  </section>
+
+  <!-- Filtres & Tableau (alimentés par /api/transactions) -->
+  <section class="card p-5 space-y-4">
+    <div class="flex flex-wrap justify-between items-center gap-4">
+      <h2 class="text-base font-semibold">Explorateur de Transactions (<span id="count-filtered">0</span>)</h2>
+      <div class="flex gap-3">
+        <select id="filter-compte" onchange="chargerTransactions()" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm">
+          <option value="">Tous les comptes</option>
+          <option value="COMPTE-A">COMPTE-A</option>
+          <option value="COMPTE-B">COMPTE-B</option>
+          <option value="COMPTE-C">COMPTE-C</option>
+        </select>
+        <select id="filter-categorie" onchange="chargerTransactions()" class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm">
+          <option value="">Toutes les catégories</option>
+          <option value="SALAIRE">SALAIRE</option>
+          <option value="LOGEMENT">LOGEMENT</option>
+          <option value="COURSES">COURSES</option>
+          <option value="SANTE">SANTE</option>
+          <option value="RESTO">RESTO</option>
+          <option value="LOISIRS">LOISIRS</option>
+          <option value="TRANSPORT">TRANSPORT</option>
+          <option value="INVESTISSEMENT">INVESTISSEMENT</option>
+          <option value="VIREMENT">VIREMENT</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto max-h-96">
+      <table class="w-full text-left text-sm">
+        <thead class="text-xs uppercase text-slate-400 border-b border-slate-800 sticky top-0 bg-[#131c31]">
+          <tr>
+            <th class="py-2 px-3">ID</th>
+            <th class="py-2 px-3">Date</th>
+            <th class="py-2 px-3">Compte</th>
+            <th class="py-2 px-3">Catégorie</th>
+            <th class="py-2 px-3">Description</th>
+            <th class="py-2 px-3 text-right">Montant</th>
+          </tr>
+        </thead>
+        <tbody id="tx-table-body" class="divide-y divide-slate-800/60"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+    const fmt = (n) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+
+    async function chargerStats() {
+      const res = await fetch('/api/stats');
+      const data = await res.json();
+
+      document.getElementById('kpi-total').textContent = data.nombreTotal;
+      document.getElementById('kpi-credits').textContent = fmt(data.totalCredits);
+      document.getElementById('kpi-debits').textContent = fmt(data.totalDebits);
+
+      const elSolde = document.getElementById('kpi-solde');
+      elSolde.textContent = fmt(data.soldeNet);
+      elSolde.className = `text-2xl font-bold mt-1 ${data.soldeNet >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+
+      // Graphique Catégories
+      new Chart(document.getElementById('chartCategories'), {
+        type: 'bar',
+        data: {
+          labels: data.topCategories.map(c => c.categorie),
+          datasets: [{
+            label: 'Débits (€)',
+            data: data.topCategories.map(c => c.montant),
+            backgroundColor: '#f43f5e',
+            borderRadius: 6
+          }]
+        },
+        options: { plugins: { legend: { display: false } } }
+      });
+
+      // Graphique Comptes
+      new Chart(document.getElementById('chartComptes'), {
+        type: 'doughnut',
+        data: {
+          labels: data.debitsParCompte.map(c => c.compte),
+          datasets: [{
+            data: data.debitsParCompte.map(c => c.montant),
+            backgroundColor: ['#10b981', '#3b82f6', '#f59e0b'],
+            borderWidth: 0
+          }]
+        }
+      });
+    }
+
+    async function chargerTransactions() {
+      const compte = document.getElementById('filter-compte').value;
+      const categorie = document.getElementById('filter-categorie').value;
+      const params = new URLSearchParams({ compte, categorie });
+
+      const res = await fetch(`/api/transactions?${params.toString()}`);
+      const txs = await res.json();
+
+      document.getElementById('count-filtered').textContent = txs.length;
+      const tbody = document.getElementById('tx-table-body');
+      tbody.innerHTML = txs.map(t => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="py-2 px-3 text-slate-400">#${t.id}</td>
+          <td class="py-2 px-3">${t.date}</td>
+          <td class="py-2 px-3"><span class="px-2 py-0.5 rounded bg-slate-800 text-xs">${t.compte}</span></td>
+          <td class="py-2 px-3">${t.categorie}</td>
+          <td class="py-2 px-3 text-slate-300">${t.description}</td>
+          <td class="py-2 px-3 text-right font-mono font-semibold ${t.type === 'CREDIT' ? 'text-emerald-400' : 'text-rose-400'}">
+            ${t.type === 'CREDIT' ? '+' : '-'}${fmt(t.montant)}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function exporterRapport() {
+      const res = await fetch('/api/rapport');
+      const texte = await res.text();
+      const blob = new Blob([texte], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'rapport.txt';
+      a.click();
+    }
+
+    // Initialisation au chargement de la page
+    chargerStats();
+    chargerTransactions();
+  </script>
+</body>
+</html>
